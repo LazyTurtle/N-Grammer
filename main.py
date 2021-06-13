@@ -1,12 +1,25 @@
-# This is a sample Python script.
-
-# Press Maiusc+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+import ngrammer
+from ngrammer.ngrammer import *
 
 
 def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
+
+    print(f'Hi, {name}')
+    tree = PrefixTree()
+    ngrams = list()
+    ngrams += PrefixTree.extract_ngrams(['a', 'b', 'c', 'd'], 3)
+    ngrams += PrefixTree.extract_ngrams(['a', 'e', 'c', 'f'], 3)
+    ngrams += PrefixTree.extract_ngrams(['a', 'b', 'g', 'h'], 3)
+    ngrams += PrefixTree.extract_ngrams(['x', 'y', 'z', 'a'], 3)
+    for ngram in ngrams:
+        tree.add_ngram(ngram)
+    tests = [['a'], ['a', 'b'], ['a', 'x'], ['e', 'c', 'f'], ['a', 'e', 'c', 'f']]
+
+    word = tree.get_word(["y", "z", "a"])
+    print(repr(word))
+    for i in range(4):
+        for v in tree.vocabulary(i):
+            print(i,v)
 
 
 # Press the green button in the gutter to run the script.
