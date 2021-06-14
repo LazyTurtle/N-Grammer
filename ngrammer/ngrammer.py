@@ -1,3 +1,8 @@
+def log2prob(log_value):
+    from math import exp
+    return exp(log_value) if log_value else 0.0
+
+
 class Word:
     """
     Encapsulates all the necessary information for calculating the probabilities
@@ -95,7 +100,7 @@ class PrefixTree:
 
         for ngram in tree.traverse():
             n = tree.get(ngram)
-            p = tree.get(ngram[:-1])  # get parent node
+            p = tree.get(ngram[:-1])
             prob = (n.count + a) / (p.count + v)
             n.probability = log(prob) if logs else prob
 
@@ -136,20 +141,30 @@ class MultiNgramPrefixTree:
     def predict_ngram(self, sequence):
         if self.coefficients is None:
             print("There are no coefficients for interpolation, reverting to greater n prediction")
-            n = len(sequence)
+            n = min(len(sequence), self.n)
             return self.trees[n].predict_ngram(sequence)
 
         total_coefficients = sum([value for n, value in self.coefficients.items()])
         assert total_coefficients > 1, "The sum of the coefficient is greater than 1"
 
         if len(self.coefficients) != len(self.trees):
-            print("The number of coefficients ({}) and trees ({}) do not match".format(len(self.coefficients),len(self.trees)))
+            print("The number of coefficients ({}) and trees ({}) do not match".format(len(self.coefficients), len(self.trees)))
 
         probability = 0.
         for i in range(1, len(self.trees) + 1):
             probability += self.coefficients[i] * self.trees[i].predict_ngram(sequence)
 
         return probability
+
+    @staticmethod
+    def store_ngrams(corpus, n, tree=None):
+        assert n > 0, "n must be greater than 0, given: {}".format(n)
+        tree = MultiNgramPrefixTree(n) if not tree else tree
+        for sequence in corpus:
+            for i in range(1, n+1):
+                for ngram in PrefixTree.extract_ngrams(sequence, i):
+                    tree.add_ngram(ngram)
+        return tree
 
     @staticmethod
     def compute_probabilities(multi_tree, logs=False, smoothing=False):
