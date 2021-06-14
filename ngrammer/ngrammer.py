@@ -99,8 +99,8 @@ class PrefixTree:
         tree.error.probability = log(a / v) if (smoothing and logs) else 0.0
 
         for ngram in tree.traverse():
-            n = tree.get(ngram)
-            p = tree.get(ngram[:-1])
+            n = tree.get_word(ngram)
+            p = tree.get_word(ngram[:-1])
             prob = (n.count + a) / (p.count + v)
             n.probability = log(prob) if logs else prob
 

@@ -1,25 +1,16 @@
 import ngrammer
 from ngrammer.ngrammer import *
-
+from ngrammer import CorpusHandler
 
 def print_hi(name):
 
     print(f'Hi, {name}')
     tree = PrefixTree()
-    ngrams = list()
-    ngrams += PrefixTree.extract_ngrams(['a', 'b', 'c', 'd'], 3)
-    ngrams += PrefixTree.extract_ngrams(['a', 'e', 'c', 'f'], 3)
-    ngrams += PrefixTree.extract_ngrams(['a', 'b', 'g', 'h'], 3)
-    ngrams += PrefixTree.extract_ngrams(['x', 'y', 'z', 'a'], 3)
-    for ngram in ngrams:
-        tree.add_ngram(ngram)
-    tests = [['a'], ['a', 'b'], ['a', 'x'], ['e', 'c', 'f'], ['a', 'e', 'c', 'f']]
-
-    word = tree.get_word(["y", "z", "a"])
-    print(repr(word))
-    for i in range(4):
-        for v in tree.vocabulary(i):
-            print(i,v)
+    train = "dataset/NL2SparQL4NLU.train.utterances.txt"
+    corpus = CorpusHandler.read_corpus(train,True)
+    tree = PrefixTree.store_ngrams(corpus,2,tree)
+    tree = PrefixTree.compute_probabilities(tree)
+    print(tree.get_word(["the", "play"]).probability)
 
 
 # Press the green button in the gutter to run the script.

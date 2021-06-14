@@ -6,18 +6,16 @@ def read_corpus(corpus_file, annotations=False):
             sentence_list = sentence.split()
             if annotations:
                 sentence_list = add_start_end_annotations(sentence_list)
-            structured_corpus += sentence_list
+            structured_corpus.append(sentence_list)
 
     return structured_corpus
 
 
-def add_start_end_annotations(sentence_list):
-    start = "[Start]"
-    end = "[End]"
+def add_start_end_annotations(sentence_list, start="[Start]", end="[End]"):
     return [start] + sentence_list + [end]
 
 
 def annotate_corpus(corpus, annotation_function):
-    for i in range(corpus):
+    for i in range(len(corpus)):
         corpus[i] = annotation_function(corpus[i])
     return corpus
