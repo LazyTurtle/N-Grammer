@@ -1,9 +1,9 @@
-def load_corpus(corpus_file, annotations=True, filter_unknown=True):
+def load_corpus(corpus_file, annotations=True, filter_unknown=True, cutoff_line=1):
     corpus = read_corpus(corpus_file)
     if annotations:
         corpus = annotate_corpus(corpus, add_start_end_annotations)
     frequency_table = frequencies(corpus)
-    lexicon = cutoff(frequency_table)
+    lexicon = cutoff(frequency_table, cutoff_line)
     if filter_unknown:
         corpus = filter_unknowns(corpus, lexicon)
         return corpus, lexicon
@@ -43,12 +43,12 @@ def cutoff(frequency_table, f_min=1, f_max=float("inf")):
     for word, frequency in frequency_table.items():
         if f_min <= frequency <= f_max:
             words.append(word)
-    return words
+    return sorted(words)
 
 
 def remove_words(lexicon, stopwords):
     filtered = list(set(lexicon) - set(stopwords))
-    return filtered
+    return sorted(filtered)
 
 
 def load_lexicon_file(lexicon_file):
