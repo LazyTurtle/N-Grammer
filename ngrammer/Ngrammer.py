@@ -3,7 +3,14 @@ def log2prob(log_value):
     return exp(log_value) if log_value else 0.0
 
 
-class Word:
+def perplexity(tree, sentence):
+    n = len(sentence)
+    probability = tree.get_word(sentence).probability
+    perp = (1/probability)**(1/n)
+    return perp
+
+
+class Node:
     """
     Encapsulates all the necessary information for calculating the probabilities
     """
@@ -23,8 +30,8 @@ class Word:
 class PrefixTree:
 
     def __init__(self, n=None):
-        self.root = Word(".")
-        self.error = Word()
+        self.root = Node(".")
+        self.error = Node()
         self.n = n
         self.probabilities = False
 
@@ -32,7 +39,7 @@ class PrefixTree:
         node = self.root
         node.count += 1
         for word in sequence:
-            node.children[word] = node.children.setdefault(word, Word(word))
+            node.children[word] = node.children.setdefault(word, Node(word))
             node = node.children[word]
             node.count += 1
 
@@ -109,6 +116,10 @@ class PrefixTree:
 
 
 class MultiNgramPrefixTree:
+    """
+    A class used almost only to encapsulate the use of multiple prefix trees
+    used to smooth out prediction
+    """
     def __init__(self, n):
         assert n > 0, "n must be greater than 0, given: {}".format(n)
         self.n = n
