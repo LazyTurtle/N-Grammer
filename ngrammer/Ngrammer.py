@@ -8,7 +8,7 @@ def log2prob(log_value):
 
 def perplexity(tree, sentence):
     n = len(sentence)
-    probability = tree.score(sentence)
+    probability = tree.predict_sentence(sentence)
     perp = (1 / probability) ** (1 / n)
     return perp
 
@@ -40,7 +40,7 @@ class PrefixTree:
 
     def __init__(self, n=None):
         self.root = Node(".")
-        self.error = Node("Error")
+        self.error = Node("[Error]")
         self.n = n
         self.interpolation = None
 
@@ -84,7 +84,7 @@ class PrefixTree:
         v = sorted(list(v))
         return v
 
-    def score(self, sentence):
+    def predict_sentence(self, sentence):
         from math import prod
         probabilities = list()
         for ngram in PrefixTree.extract_ngrams(sentence, self.n):
