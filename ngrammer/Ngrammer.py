@@ -1,4 +1,6 @@
 from math import log
+import spacy
+from collections import defaultdict
 
 
 def log2prob(log_value):
@@ -48,6 +50,7 @@ class PrefixTree:
         node = self.root
         node.count += 1
         for word in sequence:
+            word = str(word)
             node.children[word] = node.children.setdefault(word, Node(word))
             node = node.children[word]
             node.count += 1
@@ -56,6 +59,7 @@ class PrefixTree:
         node = self.root
         sequence = sequence[-self.n:]
         for word in sequence:
+            word = str(word)
             node = node.children.get(word, self.error)
         return node
 
@@ -184,7 +188,7 @@ class MultiNgramPrefixTree:
     def predict_sentence(self, sentence, n=None, use_interpolation=False):
         n = self.n if n is None else n
         if not use_interpolation:
-            return self.trees[n].score(sentence)
+            return self.trees[n].predict_sentence(sentence)
 
         if not self.trees[n].interpolation:
             self.trees[n].__deleted_interpolation__()
@@ -229,3 +233,65 @@ class MultiNgramPrefixTree:
         for n, tree in multi_tree.trees.items():
             PrefixTree.compute_probabilities(tree, logs, smoothing)
         return multi_tree
+
+
+class PosTree(MultiNgramPrefixTree):
+    spacy_model_path = "en_core_web_sm"
+    pos_tags = ["ADJ", "ADP", "ADV", "AUX", "CONJ", "DET", "INTJ", "NOUN", "NUM", "PART", "PRON", "PROPN", "PUNCT",
+                "SCONJ", "SYM", "VERB", "X"]
+
+    class PosCollector:
+
+        class Storage:
+            def __init__(self, pos):
+                self.pos = pos
+                self.words = defaultdict(int)
+                self.total = 0
+
+            def store(self, word):
+                self.words[word] += 1
+                self.total += 1
+
+            def frequency(self, word):
+                return self.words[word] / self.total
+
+        def __init__(self):
+            self.collectors = dict()
+
+        def store(self, pos, word):
+            if pos not in self.collectors.keys():
+                self.collectors[pos] = self.Storage(pos)
+
+            self.collectors[pos].store(word)
+
+        def frequency(self, word):
+            frequencies = dict()
+            for pos, storage in self.collectors.items():
+                frequencies[pos] = storage.frequency(word)
+            return frequencies
+
+    def __init__(self, n):
+        super().__init__(n)
+        self.nlp = spacy.load(PosTree.spacy_model_path)
+        self.collector = PosTree.PosCollector()
+
+    @staticmethod
+    def store_ngrams(corpus, n, tree=None):
+        assert n > 0, "n must be greater than 0, given: {}".format(n)
+        if tree is None:
+            tree = PosTree(n)
+
+        corpus = [" ".join(sentence) for sentence in corpus]
+        for doc in tree.nlp.pipe(corpus):
+
+            # I'll treat "[Start]" and "[End]" as special characters
+            sentence = ["[Start]"] + [token.text for token in doc] + ["[End]"]
+            pos_sentence = ["X"] + [token.pos_ for token in doc] + ["X"]
+
+            for i in range(1, n + 1):
+                for ngram in PrefixTree.extract_ngrams(pos_sentence, i):
+                    tree.add_ngram(ngram, i)
+
+            for i in range(len(sentence)):
+                tree.collector.store(pos_sentence[i], sentence[i])
+        return tree
