@@ -257,14 +257,36 @@ class PosTree(MultiNgramPrefixTree):
             def frequency(self, word):
                 return self.words[word] / self.total
 
+        class Cache:
+
+            def __init__(self, pos, maximum=200):
+                from collections import deque
+                self.pos = pos
+                self.maximum = maximum
+                self.cache = deque()
+
+            def store(self, word):
+                removed_word = None
+                if len(self.cache) == self.maximum:
+                    removed_word = self.cache.popleft()
+                self.cache.append(word)
+                return removed_word
+
+            def frequency(self, word):
+                return self.cache.count(word) / len(self.cache)
+
         def __init__(self):
             self.collectors = dict()
+            self.caches = dict()
 
         def store(self, pos, word):
             if pos not in self.collectors.keys():
                 self.collectors[pos] = self.Storage(pos)
+            if pos not in self.caches.keys():
+                self.caches[pos] = self.Cache(pos)
 
             self.collectors[pos].store(word)
+            self.caches[pos].store(word)
 
         def frequency(self, word):
             frequencies = dict()
