@@ -136,7 +136,7 @@ class PrefixTree:
         tree.logs = logs
         tree.smoothing = smoothing
 
-        v = len(tree.vocabulary(tree.n - 1)) if tree.smoothing else 0
+        v = len(tree.get_vocabulary(tree.n - 1)) if tree.smoothing else 0
         a = 1 if tree.smoothing else 0
 
         tree.error.probability = log(a / v) if (smoothing and logs) else 0.0
@@ -183,7 +183,7 @@ class MultiNgramPrefixTree:
         n = len(self.trees) if n is None else n
         self.trees[n].traverse(node, sequence, size)
 
-    def vocabulary(self, n=None):
+    def get_vocabulary(self, n=None):
         n = self.n if n is None else n
         return self.trees[n].vocabulary(n)
 
@@ -276,6 +276,8 @@ class PosTree(MultiNgramPrefixTree):
         super().__init__(n)
         self.nlp = spacy.load(PosTree.spacy_model_path)
         self.collector = PosTree.PosCollector()
+        self.vocabulary = defaultdict(int)
+        self.unique_words_rate = 0.
 
     def predict_sentence(self, sentence, n=None, annotations=True, use_interpolation=False):
         n = self.n if n is None else n
@@ -323,12 +325,16 @@ class PosTree(MultiNgramPrefixTree):
         return sum(probabilities) if self.logs else prod(probabilities)
 
     def __extract_probability_pos_gram__(self, n, ngram, pos_gram, tree):
+        if ngram[-1] not in self.vocabulary.keys():
+            return self.unique_words_rate
+
         ngram_probability = 0.
         frequencies = self.collector.frequency(ngram[-1])
         pos_node = tree.get(pos_gram[:-1])
         for possible_pos_gram in tree.traverse(pos_node, pos_gram[:-1], n):
             p_word = frequencies[possible_pos_gram[-1]]
-            p_pos = tree.get(possible_pos_gram).probability
+            # the float number is arbitrary
+            p_pos = tree.get(possible_pos_gram).probability + 0.000001
             ngram_probability += p_word * p_pos
         return ngram_probability
 
@@ -366,4 +372,12 @@ class PosTree(MultiNgramPrefixTree):
 
             for i in range(len(sentence)):
                 tree.collector.store(pos_sentence[i], sentence[i])
+                tree.vocabulary[sentence[i]] += 1
+
+        n_unique_words = 0
+        for word, n in tree.vocabulary.items():
+            if n == 1:
+                n_unique_words += 1
+        tree.unique_words_rate = n_unique_words / len(tree.vocabulary.keys())
+
         return tree
