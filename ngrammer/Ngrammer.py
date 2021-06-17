@@ -70,10 +70,12 @@ class PrefixTree:
 
         if not node.children:
             yield sequence
+            return
 
         if size:
             if len(sequence) == size:
                 yield sequence
+                return
 
         for word, n in node.children.items():
             sequence.append(word)
@@ -274,6 +276,67 @@ class PosTree(MultiNgramPrefixTree):
         super().__init__(n)
         self.nlp = spacy.load(PosTree.spacy_model_path)
         self.collector = PosTree.PosCollector()
+
+    def predict_sentence(self, sentence, n=None, annotations=True, use_interpolation=False):
+        n = self.n if n is None else n
+        from math import prod
+
+        sentence, pos_sentence = self.get_sentence_pos(sentence, annotations)
+
+        if not use_interpolation:
+
+            tree = self.trees[n]
+            probabilities = list()
+            ngrams = PrefixTree.extract_ngrams(sentence, n)
+            pos_ngrams = PrefixTree.extract_ngrams(pos_sentence, n)
+
+            for i in range(len(ngrams)):
+                ngram = ngrams[i]
+                pos_gram = pos_ngrams[i]
+                ngram_probability = 0.
+                frequencies = self.collector.frequency(ngram[-1])
+                for possible_pos_gram in tree.traverse(tree.get(pos_gram[:-1]), pos_gram[:-1], n):
+                    p_word = frequencies[possible_pos_gram[-1]]
+                    p_pos = tree.get(possible_pos_gram).probability
+                    ngram_probability += p_word * p_pos
+                probabilities.append(ngram_probability)
+
+            return sum(probabilities) if tree.logs else prod(probabilities)
+
+        if not self.trees[n].interpolation:
+            self.trees[n].__deleted_interpolation__()
+
+        coefficients = self.trees[n].interpolation
+        probabilities = list()
+
+        for ngram in PrefixTree.extract_ngrams(sentence, n):
+            multigram_probabilities = list()
+
+            for i in range(1, n + 1):
+                node = self.trees[i].get(ngram)
+                multigram_probabilities.append(node.probability)
+            for i in range(len(multigram_probabilities)):
+                multigram_probabilities[i] *= coefficients[i]
+
+            interpolated_ngram_probability = sum(multigram_probabilities)
+
+            probabilities.append(interpolated_ngram_probability)
+        return sum(probabilities) if self.logs else prod(probabilities)
+
+    def get_sentence_pos(self, corpus_sentence, annotation=True):
+
+        if annotation:
+            # remove "[Start]" and "[End]" for spacy
+            corpus_sentence = corpus_sentence[1:-1]
+
+        sentence = " ".join(corpus_sentence)
+        doc = self.nlp(sentence)
+
+        # I'll treat "[Start]" and "[End]" as special characters
+        sentence = ["[Start]"] + [token.text for token in doc] + ["[End]"]
+        pos_sentence = ["X"] + [token.pos_ for token in doc] + ["X"]
+
+        return sentence, pos_sentence
 
     @staticmethod
     def store_ngrams(corpus, n, tree=None):
