@@ -284,7 +284,6 @@ class PosTree(MultiNgramPrefixTree):
         sentence, pos_sentence = self.get_sentence_pos(sentence, annotations)
 
         if not use_interpolation:
-
             tree = self.trees[n]
             probabilities = list()
             ngrams = PrefixTree.extract_ngrams(sentence, n)
@@ -293,13 +292,8 @@ class PosTree(MultiNgramPrefixTree):
             for i in range(len(ngrams)):
                 ngram = ngrams[i]
                 pos_gram = pos_ngrams[i]
-                ngram_probability = 0.
-                frequencies = self.collector.frequency(ngram[-1])
-                for possible_pos_gram in tree.traverse(tree.get(pos_gram[:-1]), pos_gram[:-1], n):
-                    p_word = frequencies[possible_pos_gram[-1]]
-                    p_pos = tree.get(possible_pos_gram).probability
-                    ngram_probability += p_word * p_pos
-                probabilities.append(ngram_probability)
+                probability = self.__extract_probability_pos_gram__(n, ngram, pos_gram, tree)
+                probabilities.append(probability)
 
             return sum(probabilities) if tree.logs else prod(probabilities)
 
@@ -309,19 +303,34 @@ class PosTree(MultiNgramPrefixTree):
         coefficients = self.trees[n].interpolation
         probabilities = list()
 
-        for ngram in PrefixTree.extract_ngrams(sentence, n):
+        ngrams = PrefixTree.extract_ngrams(sentence, n)
+        pos_ngrams = PrefixTree.extract_ngrams(pos_sentence, n)
+
+        for i in range(len(ngrams)):
+            ngram = ngrams[i]
+            pos_gram = pos_ngrams[i]
             multigram_probabilities = list()
+            for j in range(1, n + 1):
+                probability = self.__extract_probability_pos_gram__(j, ngram[-j:], pos_gram[-j:], self.trees[j])
+                multigram_probabilities.append(probability)
 
-            for i in range(1, n + 1):
-                node = self.trees[i].get(ngram)
-                multigram_probabilities.append(node.probability)
-            for i in range(len(multigram_probabilities)):
-                multigram_probabilities[i] *= coefficients[i]
+            for j in range(len(multigram_probabilities)):
+                multigram_probabilities[j] *= coefficients[j]
 
-            interpolated_ngram_probability = sum(multigram_probabilities)
+            interpolated_probability = sum(multigram_probabilities)
+            probabilities.append(interpolated_probability)
 
-            probabilities.append(interpolated_ngram_probability)
         return sum(probabilities) if self.logs else prod(probabilities)
+
+    def __extract_probability_pos_gram__(self, n, ngram, pos_gram, tree):
+        ngram_probability = 0.
+        frequencies = self.collector.frequency(ngram[-1])
+        pos_node = tree.get(pos_gram[:-1])
+        for possible_pos_gram in tree.traverse(pos_node, pos_gram[:-1], n):
+            p_word = frequencies[possible_pos_gram[-1]]
+            p_pos = tree.get(possible_pos_gram).probability
+            ngram_probability += p_word * p_pos
+        return ngram_probability
 
     def get_sentence_pos(self, corpus_sentence, annotation=True):
 
