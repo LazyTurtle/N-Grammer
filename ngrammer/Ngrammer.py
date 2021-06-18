@@ -1,3 +1,4 @@
+import collections
 from math import log
 import spacy
 from collections import defaultdict
@@ -239,8 +240,6 @@ class MultiNgramPrefixTree:
 
 class PosTree(MultiNgramPrefixTree):
     spacy_model_path = "en_core_web_sm"
-    pos_tags = ["ADJ", "ADP", "ADV", "AUX", "CONJ", "DET", "INTJ", "NOUN", "NUM", "PART", "PRON", "PROPN", "PUNCT",
-                "SCONJ", "SYM", "VERB", "X"]
 
     class PosCollector:
 
@@ -275,18 +274,36 @@ class PosTree(MultiNgramPrefixTree):
             def frequency(self, word):
                 return self.cache.count(word) / len(self.cache)
 
-        def __init__(self):
+        def __init__(self, caches_lengths=200, alpha=0.5):
             self.collectors = dict()
-            self.caches = dict()
+            self.caches = None
+            self.caches_lengths = caches_lengths
+            assert 0 <= alpha <= 1, "Alpha must be a number between 0 and 1, given: {}".format(alpha)
+            self.alpha = alpha
+
+            if self.caches_lengths:
+                if isinstance(self.caches_lengths, int):
+                    self.caches_lengths = [self.caches_lengths]
+                    self.caches = [dict()]
+                elif isinstance(self.caches_lengths, collections.Iterable):
+                    self.caches = [dict()] * len(self.caches_lengths)
+                else:
+                    print("Error, expected int or an iterable object, given:", self.caches_lengths)
 
         def store(self, pos, word):
             if pos not in self.collectors.keys():
                 self.collectors[pos] = self.Storage(pos)
-            if pos not in self.caches.keys():
-                self.caches[pos] = self.Cache(pos)
+
+            if self.caches:
+                for i in range(len(self.caches)):
+                    if pos not in self.caches[i].keys():
+                        self.caches[i][pos] = self.Cache(pos, self.caches_lengths[i])
 
             self.collectors[pos].store(word)
-            self.caches[pos].store(word)
+
+            if self.caches:
+                for cache in self.caches:
+                    cache[pos].store(word)
 
         def frequency(self, word):
             frequencies = dict()
@@ -294,10 +311,25 @@ class PosTree(MultiNgramPrefixTree):
                 frequencies[pos] = storage.frequency(word)
             return frequencies
 
-    def __init__(self, n):
+        def word_probability(self, word):
+            if not self.caches:
+                return self.frequency(word)
+
+            probabilities = dict()
+            for pos, frequency in self.collectors.items():
+                probabilities[pos] = self.alpha * frequency
+
+                beta = (1 - self.alpha) / len(self.caches)
+
+                for i in range(len(self.caches)):
+                    probabilities[pos] += beta * self.caches[i][pos].frequency(word)
+
+            return probabilities
+
+    def __init__(self, n, caches_lengths=None, alpha=0.5):
         super().__init__(n)
         self.nlp = spacy.load(PosTree.spacy_model_path)
-        self.collector = PosTree.PosCollector()
+        self.collector = PosTree.PosCollector(caches_lengths, alpha)
         self.vocabulary = defaultdict(int)
         self.unique_words_rate = 0.
 
@@ -351,10 +383,10 @@ class PosTree(MultiNgramPrefixTree):
             return self.unique_words_rate
 
         ngram_probability = 0.
-        frequencies = self.collector.frequency(ngram[-1])
+        probabilities = self.collector.word_probability(ngram[-1])
         pos_node = tree.get(pos_gram[:-1])
         for possible_pos_gram in tree.traverse(pos_node, pos_gram[:-1], n):
-            p_word = frequencies[possible_pos_gram[-1]]
+            p_word = probabilities[possible_pos_gram[-1]]
             # the float number is arbitrary
             p_pos = tree.get(possible_pos_gram).probability + 0.000001
             ngram_probability += p_word * p_pos
