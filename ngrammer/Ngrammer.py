@@ -408,58 +408,27 @@ class CachedStorage(Storage):
 
 
 class Collector(Predictor):
+    """
+    Collect the frequencies of single words over their part of speech in different cached storages
+    """
 
-    def __init__(self, caches_lengths=200, alpha=0.5):
+    def __init__(self, caches_lengths=200):
         self.collectors = dict()
-        self.caches = None
         self.caches_lengths = caches_lengths
-        assert 0 <= alpha <= 1, "Alpha must be a number between 0 and 1, given: {}".format(alpha)
-        self.alpha = alpha
 
-        if self.caches_lengths:
-            if isinstance(self.caches_lengths, int):
-                self.caches_lengths = [self.caches_lengths]
-                self.caches = [dict()]
-            elif isinstance(self.caches_lengths, collections.Iterable):
-                self.caches = [dict()] * len(self.caches_lengths)
-            else:
-                print("Error, expected int or an iterable object, given:", self.caches_lengths)
-
-    def store(self, pos, word):
+    def store(self, data):
+        pos, word = data
         if pos not in self.collectors.keys():
-            self.collectors[pos] = Storage(pos)
-
-        if self.caches:
-            for i in range(len(self.caches)):
-                if pos not in self.caches[i].keys():
-                    self.caches[i][pos] = Cache(self.caches_lengths[i])
-
+            self.collectors[pos] = CachedStorage(pos, self.caches_lengths)
         self.collectors[pos].store(word)
 
-        if self.caches:
-            for cache in self.caches:
-                cache[pos].store(word)
-
-    def frequency(self, word):
+    def predict(self, data):
         frequencies = dict()
         for pos, storage in self.collectors.items():
-            frequencies[pos] = storage.probability(word)
-        return frequencies
+            frequencies[pos] = storage.predict(data)
+        result = sum([probability for pos, probability in frequencies.items()])
+        return result
 
-    def word_probability(self, word):
-        if not self.caches:
-            return self.frequency(word)
-
-        probabilities = dict()
-        for pos, frequency in self.collectors.items():
-            probabilities[pos] = self.alpha * frequency
-
-            beta = (1 - self.alpha) / len(self.caches)
-
-            for i in range(len(self.caches)):
-                probabilities[pos] += beta * self.caches[i][pos].probability(word)
-
-        return probabilities
 
 class PosTree(PrefixTree):
     spacy_model_path = "en_core_web_sm"
