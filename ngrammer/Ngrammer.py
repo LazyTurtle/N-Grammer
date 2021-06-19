@@ -117,6 +117,7 @@ class PrefixTree(Predictor):
         return probability
 
     def train(self, logs=False, smoothing=False):
+        print("Start training {}".format(self))
         self.logs = logs
         self.smoothing = smoothing
 
