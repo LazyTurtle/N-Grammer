@@ -209,7 +209,6 @@ class Cache(Predictor):
     def _frequency(self, word):
         if self.active:
             return self.cache.count(word) / len(self.cache)
-        print("Cache is not active, {} out of {} necessary items are present.".format(len(self.cache), self.minimum))
         return None
 
 
@@ -254,7 +253,7 @@ class CachedPrefixTree(PrefixTree):
             cache_probability += cache.predict(ngram[-1])
         cache_probability /= len(self.caches)
         k_c = self.interpolation_coefficients[0]
-        k_t = self.interpolation_coefficients[1]
+        k_t = sum(self.interpolation_coefficients[1:])
         ngram_probability = k_c * cache_probability + k_t * tree_probability
         return ngram_probability
 
@@ -402,10 +401,12 @@ class CachedStorage(Storage):
         self.cache.store(data)
         storage_part = super().predict(data)
         cache_part = self.cache.predict(data)
-        f_c = self.coefficients[0]
-        f_s = self.coefficients[1]
-        probability = f_c * cache_part + f_s * storage_part
-        return probability
+        if cache_part is not None:
+            f_c = self.coefficients[0]
+            f_s = self.coefficients[1]
+            probability = f_c * cache_part + f_s * storage_part
+            return probability
+        return storage_part
 
 
 class Collector(Predictor):
