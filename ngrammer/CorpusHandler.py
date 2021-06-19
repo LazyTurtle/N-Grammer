@@ -1,10 +1,10 @@
-def load_corpus(corpus_file, annotations=True, filter_unknown=True, cutoff_line=1, placeholder="[Unknown]"):
+def load_corpus(corpus_file, annotations=True, filter_unknown=False, cutoff_line=1, placeholder="[Unknown]"):
     corpus = read_corpus(corpus_file)
     if annotations:
         corpus = annotate_corpus(corpus, add_start_end_annotations)
-    frequency_table = frequencies(corpus)
-    lexicon = cutoff(frequency_table, cutoff_line)
     if filter_unknown:
+        frequency_table = frequencies(corpus)
+        lexicon = cutoff(frequency_table, cutoff_line)
         corpus = filter_unknowns(corpus, lexicon, placeholder)
         return corpus, lexicon
     return corpus
