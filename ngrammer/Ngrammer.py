@@ -332,15 +332,15 @@ class MultiNgramPrefixTree(MultiPredictor):
         self.coefficients = self._deleted_interpolation()
 
     def get(self, sequence, n=None):
-        n = self.n-1 if n is None else n-1
+        n = self.n - 1 if n is None else n - 1
         return self.predictors[n].get(sequence)
 
     def traverse(self, n=None, node=None, sequence=None, size=None):
-        n = self.n-1 if n is None else n-1
+        n = self.n - 1 if n is None else n - 1
         return self.predictors[n].traverse(node, sequence, size)
 
     def get_vocabulary(self, n=None):
-        n = self.n-1 if n is None else n-1
+        n = self.n - 1 if n is None else n - 1
         return self.predictors[n].vocabulary(n)
 
     def _deleted_interpolation(self):
@@ -364,6 +364,7 @@ class Storage(Predictor):
     """
     Store the frequencies of singular words among an entire set of words
     """
+
     def __init__(self, pos=None):
         self.pos = pos
         self.words = defaultdict(int)
@@ -426,121 +427,113 @@ class Collector(Predictor):
         frequencies = dict()
         for pos, storage in self.collectors.items():
             frequencies[pos] = storage.predict(data)
-        result = sum([probability for pos, probability in frequencies.items()])
-        return result
+        return frequencies
+
+    def set_coefficients(self, coefficients):
+        for pos, storage in self.collectors.items():
+            storage.coefficients = coefficients
 
 
 class PosTree(PrefixTree):
+    """
+    Uses the POS in the prefix tree and the collectors in order to compute the probabilities of sentences
+    The predict data should be already formatted properly
+    """
     spacy_model_path = "en_core_web_sm"
 
+    def __init__(self, n, caches_length=200):
+        super(PosTree, self).__init__(n)
+        self.nlp = self._setup_spacy()
+        self.word_collector = Collector(caches_length)
+        self.tree_coefficient = None
+        self.collector_coefficient = None
 
+    def store(self, data):
+        sentence, pos_sentence = self._convert_to_pos(data)
+        super(PosTree, self).store(pos_sentence)
+        for i in range(len(sentence)):
+            word = sentence[i]
+            pos = pos_sentence[i]
+            self.word_collector.store((pos, word))
 
-    def __init__(self, n, caches_lengths=None, alpha=0.5):
-        super().__init__(n)
-        self.nlp = spacy.load(PosTree.spacy_model_path)
-        self.collector = PosTree.PosCollector(caches_lengths, alpha)
-        self.vocabulary = defaultdict(int)
-        self.unique_words_rate = 0.
+    def train(self, logs=False, smoothing=False):
+        super().train(logs, smoothing)
+        coefficients = self._deleted_interpolation()
+        self.collector_coefficient = sum(coefficients[:2])
+        self.tree_coefficient = sum(coefficients[2:])
+        cache_coef = coefficients[0] / self.collector_coefficient
+        storage_coef = coefficients[1] / self.collector_coefficient
+        self.word_collector.set_coefficients((cache_coef, storage_coef))
 
-    def predict_sentence(self, sentence, n=None, annotations=True, use_interpolation=False):
-        n = self.n if n is None else n
+    def _predict_sentence(self, sentence):
         from math import prod
 
-        sentence, pos_sentence = self.get_sentence_pos(sentence, annotations)
+        sentence, pos_sentence = self._convert_to_pos(sentence)
+        ngrams = self._extract_ngrams(sentence)
+        posgrams = self._extract_ngrams(pos_sentence)
 
-        if not use_interpolation:
-            tree = self.trees[n]
-            probabilities = list()
-            ngrams = PrefixTree.extract_ngrams(sentence, n)
-            pos_ngrams = PrefixTree.extract_ngrams(pos_sentence, n)
-
-            for i in range(len(ngrams)):
-                ngram = ngrams[i]
-                pos_gram = pos_ngrams[i]
-                probability = self.__extract_probability_pos_gram__(n, ngram, pos_gram, tree)
-                probabilities.append(probability)
-
-            return sum(probabilities) if tree.logs else prod(probabilities)
-
-        if not self.trees[n].interpolation:
-            self.trees[n].__deleted_interpolation__()
-
-        coefficients = self.trees[n].interpolation
         probabilities = list()
-
-        ngrams = PrefixTree.extract_ngrams(sentence, n)
-        pos_ngrams = PrefixTree.extract_ngrams(pos_sentence, n)
-
         for i in range(len(ngrams)):
             ngram = ngrams[i]
-            pos_gram = pos_ngrams[i]
-            multigram_probabilities = list()
-            for j in range(1, n + 1):
-                probability = self.__extract_probability_pos_gram__(j, ngram[-j:], pos_gram[-j:], self.trees[j])
-                multigram_probabilities.append(probability)
+            posgram = posgrams[i]
+            probabilities.append(self._predict_pos_ngram(ngram, posgram))
 
-            for j in range(len(multigram_probabilities)):
-                multigram_probabilities[j] *= coefficients[j]
+        result = sum(probabilities) if self.logs else prod(probabilities)
+        return result
 
-            interpolated_probability = sum(multigram_probabilities)
-            probabilities.append(interpolated_probability)
+    def _predict_pos_ngram(self, ngram, posgram):
+        parent = self.get(posgram[:-1])
+        probabilities = list()
+        word_probabilities = self.word_collector.predict(ngram[-1])
+        for possible_pos_gram in self.traverse(parent, posgram[:-1], self.n):
+            current_pos = possible_pos_gram[-1]
+            pos_probability = super()._predict_ngram(possible_pos_gram)
+            word_probability = word_probabilities[current_pos]
+            joint_probability = word_probability * self.collector_coefficient + pos_probability * self.tree_coefficient
+            probabilities.append(joint_probability)
+        probability = sum(probabilities)
+        return probability
 
-        return sum(probabilities) if self.logs else prod(probabilities)
+    def _setup_spacy(self, unknown_placeholder="UNKNOWN"):
+        # I'll treat the placeholder for OOV words as a special character
+        nlp = spacy.load(PosTree.spacy_model_path)
+        ruler = nlp.get_pipe("attribute_ruler")
+        patterns = [[{"ORTH": unknown_placeholder}]]
+        attrs = {"TAG": "X", "POS": "X"}
+        ruler.add(patterns=patterns, attrs=attrs)
+        return nlp
 
-    def __extract_probability_pos_gram__(self, n, ngram, pos_gram, tree):
-        if ngram[-1] not in self.vocabulary.keys():
-            return self.unique_words_rate
+    def _convert_to_pos(self, sentence, annotations=("[Start]", "[End]"), unknown_placeholder="UNKNOWN"):
 
-        ngram_probability = 0.
-        probabilities = self.collector.word_probability(ngram[-1])
-        pos_node = tree.get(pos_gram[:-1])
-        for possible_pos_gram in tree.traverse(pos_node, pos_gram[:-1], n):
-            p_word = probabilities[possible_pos_gram[-1]]
-            # the float number is arbitrary
-            p_pos = tree.get(possible_pos_gram).probability + 0.000001
-            ngram_probability += p_word * p_pos
-        return ngram_probability
-
-    def get_sentence_pos(self, corpus_sentence, annotation=True):
-
-        if annotation:
+        if annotations is not None:
             # remove "[Start]" and "[End]" for spacy
-            corpus_sentence = corpus_sentence[1:-1]
+            sentence = sentence[1:-1]
 
-        sentence = " ".join(corpus_sentence)
+        for i in range(len(sentence)):
+            if sentence[i] == "<unk>":
+                sentence[i] = unknown_placeholder
+
+        sentence = " ".join(sentence)
         doc = self.nlp(sentence)
 
         # I'll treat "[Start]" and "[End]" as special characters
-        sentence = ["[Start]"] + [token.text for token in doc] + ["[End]"]
+        sentence = [annotations[0]] + [token.text for token in doc] + [annotations[1]]
         pos_sentence = ["X"] + [token.pos_ for token in doc] + ["X"]
 
         return sentence, pos_sentence
 
-    @staticmethod
-    def store_ngrams(corpus, n, tree=None):
-        assert n > 0, "n must be greater than 0, given: {}".format(n)
-        if tree is None:
-            tree = PosTree(n)
-
-        corpus = [" ".join(sentence) for sentence in corpus]
-        for doc in tree.nlp.pipe(corpus):
-
-            # I'll treat "[Start]" and "[End]" as special characters
-            sentence = ["[Start]"] + [token.text for token in doc] + ["[End]"]
-            pos_sentence = ["X"] + [token.pos_ for token in doc] + ["X"]
-
-            for i in range(1, n + 1):
-                for ngram in PrefixTree.extract_ngrams(pos_sentence, i):
-                    tree.add_ngram(ngram, i)
-
-            for i in range(len(sentence)):
-                tree.collector.store(pos_sentence[i], sentence[i])
-                tree.vocabulary[sentence[i]] += 1
-
-        n_unique_words = 0
-        for word, n in tree.vocabulary.items():
-            if n == 1:
-                n_unique_words += 1
-        tree.unique_words_rate = n_unique_words / len(tree.vocabulary.keys())
-
-        return tree
+    def _deleted_interpolation(self):
+        w = [0] * self.n
+        for ngram in self.traverse():
+            # current ngram count
+            v = self.get(ngram).count
+            # (n)-gram counts
+            n = [self.get(ngram[0:i + 1]).count for i in range(len(ngram))]
+            # (n-1)-gram counts -- parent node
+            p = [self.get(ngram[0:i]).count for i in range(len(ngram))]
+            # -1 from both counts & normalize
+            d = [float((n[i] - 1) / (p[i] - 1)) if (p[i] - 1 > 0) else 0.0 for i in range(len(n))]
+            # increment weight of the max by raw ngram count
+            k = d.index(max(d))
+            w[k] += v
+        return [float(v) / sum(w) for v in w]
