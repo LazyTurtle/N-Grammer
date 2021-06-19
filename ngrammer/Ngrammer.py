@@ -279,7 +279,37 @@ class CachedPrefixTree(PrefixTree):
         return [float(v) / sum(w) for v in w]
 
 
-class MultiNgramPrefixTree(Predictor):
+class MultiPredictor(Predictor):
+    def __init__(self):
+        self.predictors = self._construct_predictors()
+        self.coefficients = self._construct_coefficients()
+
+    def store(self, data):
+        for predictor in self.predictors:
+            predictor.store(data)
+
+    def predict(self, data):
+        probabilities = list()
+        for predictor in self.predictors:
+            prediction = predictor.predict(data)
+            probabilities.append(prediction)
+        for i in range(len(probabilities)):
+            probabilities[i] *= self.coefficients[i]
+        result = sum(probabilities)
+        return result
+
+    def train(self):
+        for predictor in self.predictors:
+            predictor.train()
+
+    def _construct_predictors(self):
+        return None
+
+    def _construct_coefficients(self):
+        return None
+
+
+class MultiNgramPrefixTree(MultiPredictor):
     """
     A class used almost only to encapsulate the use of multiple prefix trees
     used to smooth out prediction
@@ -288,49 +318,30 @@ class MultiNgramPrefixTree(Predictor):
     def __init__(self, n, coefficients=None):
         assert n > 0, "n must be greater than 0, given: {}".format(n)
         self.n = n
-        self.trees = dict()
-        for i in range(1, n + 1):
-            self.trees[i] = PrefixTree(i)
-        self.coefficients = coefficients
+        super(MultiNgramPrefixTree, self).__init__()
 
-    def store(self, data):
-        for n, tree in self.trees.items():
-            tree.store(data)
-
-    def predict(self, data):
-        assert self.coefficients is not None, "There have to be coefficients in order to interpolate the trees"
-        assert 0.99 <= sum(self.coefficients) <= 1.01, "The coefficients does not sum up to 1."
+    def _construct_predictors(self):
+        super()._construct_predictors()
         trees = list()
-        for n in sorted(self.trees.keys()):
-            trees.append(self.trees[n])
-
-        probabilities = list()
-        for tree in trees:
-            prediction = tree.predict(data)
-            probabilities.append(prediction)
-
-        for i in range(len(probabilities)):
-            probabilities[i] *= self.coefficients[i]
-
-        probability = sum(probabilities)
-        return probability
+        for i in range(1, self.n + 1):
+            trees.append(PrefixTree(i))
+        return trees
 
     def train(self, logs=False, smoothing=False):
-        for n, tree in self.trees.items():
-            tree.train(logs, smoothing)
+        super(MultiNgramPrefixTree, self).train()
         self.coefficients = self._deleted_interpolation()
 
     def get(self, sequence, n=None):
-        n = self.n if n is None else n
-        return self.trees[n].get(sequence)
+        n = self.n-1 if n is None else n-1
+        return self.predictors[n].get(sequence)
 
     def traverse(self, n=None, node=None, sequence=None, size=None):
-        n = self.n if n is None else n
-        return self.trees[n].traverse(node, sequence, size)
+        n = self.n-1 if n is None else n-1
+        return self.predictors[n].traverse(node, sequence, size)
 
     def get_vocabulary(self, n=None):
-        n = self.n if n is None else n
-        return self.trees[n].vocabulary(n)
+        n = self.n-1 if n is None else n-1
+        return self.predictors[n].vocabulary(n)
 
     def _deleted_interpolation(self):
         w = [0] * self.n
