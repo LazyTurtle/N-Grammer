@@ -101,7 +101,8 @@ class PrefixTree(Predictor):
         assert isinstance(data, collections.Iterable), "Data must be a sequence"
         if isinstance(data, str):
             data = data.strip().split()
-        return self._predict_sentence(data)
+        prediction = self._predict_sentence(data)
+        return prediction
 
     def _predict_sentence(self, sentence):
         from math import prod
@@ -111,7 +112,8 @@ class PrefixTree(Predictor):
         return sum(probabilities) if self.logs else prod(probabilities)
 
     def _predict_ngram(self, ngram):
-        probability = self.get(ngram).probability
+        node = self.get(ngram)
+        probability = node.probability
         return probability
 
     def train(self, logs=False, smoothing=False):
@@ -226,7 +228,7 @@ class CachedPrefixTree(PrefixTree):
         caches = list()
         if caches_lengths:
             if isinstance(caches_lengths, int):
-                caches.append(caches_lengths)
+                caches.append(Cache(caches_lengths))
             elif isinstance(caches_lengths, collections.Iterable):
                 for limit in caches_lengths:
                     caches.append(Cache(limit))
@@ -239,11 +241,12 @@ class CachedPrefixTree(PrefixTree):
     def predict(self, data):
         for cache in self.caches:
             cache.store(data)
-        return super().predict(data)
+        probability = super().predict(data)
+        return probability
 
     def _predict_ngram(self, ngram):
         tree_probability = super()._predict_ngram(ngram)
-        if self.interpolation_coefficients is None or len(self.caches) == 0 or all([cache.active for cache in self.caches]):
+        if self.interpolation_coefficients is None or len(self.caches) == 0 or not all([cache.active for cache in self.caches]):
             return tree_probability
 
         cache_probability = 0.
