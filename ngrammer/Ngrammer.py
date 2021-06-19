@@ -16,6 +16,24 @@ def perplexity(tree, sentence):
     return perp
 
 
+class Predictor:
+
+    def store(self, data):
+        pass
+
+    def predict(self, data):
+        pass
+
+    def train(self):
+        pass
+
+    def __set__(self, instance, value):
+        self.instance = value
+
+    def __get__(self, instance, owner):
+        return self.instance
+
+
 class Node:
     """
     Encapsulates all the necessary information for calculating the probabilities
@@ -39,15 +57,38 @@ class Node:
         return "[string: {}, count: {}, children: {}]".format(self.string, self.count, self.children)
 
 
-class PrefixTree:
+class PrefixTree(Predictor):
+    """
+    Fairly standard implementation of the prefix tree.
+    It takes an n variable that indicates the length if the ngrams it computes
+    """
 
     def __init__(self, n=None):
         self.root = Node(".")
         self.error = Node("[Error]")
+        assert n > 0, "n must be greater than 0, given: {}".format(n)
         self.n = n
-        self.interpolation = None
+        self.logs = None
+        self.smoothing = None
 
-    def add_ngram(self, sequence):
+    def store(self, data):
+        assert isinstance(data, collections.Iterable), "Data must be a sequence"
+        if isinstance(data, str):
+            data = data.strip().split()
+        self._add_sentence(data)
+
+    def _add_sentence(self, sentence):
+        ngrams = self._extract_ngrams(sentence)
+        for ngram in ngrams:
+            self._add_ngram(ngram)
+
+    def _extract_ngrams(self, sequence):
+        ngrams = list()
+        for i in range(self.n, len(sequence) + 1):
+            ngrams.append(sequence[i - self.n:i])
+        return ngrams
+
+    def _add_ngram(self, sequence):
         node = self.root
         node.count += 1
         for word in sequence:
@@ -55,6 +96,38 @@ class PrefixTree:
             node.children[word] = node.children.setdefault(word, Node(word))
             node = node.children[word]
             node.count += 1
+
+    def predict(self, data):
+        assert isinstance(data, collections.Iterable), "Data must be a sequence"
+        if isinstance(data, str):
+            data = data.strip().split()
+        return self._predict_sentence(data)
+
+    def _predict_sentence(self, sentence):
+        from math import prod
+        probabilities = list()
+        for ngram in self._extract_ngrams(sentence):
+            probabilities.append(self._predict_ngram(ngram))
+        return sum(probabilities) if self.logs else prod(probabilities)
+
+    def _predict_ngram(self, ngram):
+        probability = self.get(ngram).probability
+        return probability
+
+    def train(self, logs=False, smoothing=False):
+        self.logs = logs
+        self.smoothing = smoothing
+
+        v = len(self.vocabulary(self.n - 1)) if self.smoothing else 0
+        a = 1 if self.smoothing else 0
+
+        self.error.probability = log(a / v) if (smoothing and logs) else 0.0
+
+        for ngram in self.traverse():
+            n = self.get(ngram)
+            p = self.get(ngram[:-1])
+            prob = (n.count + a) / (p.count + v)
+            n.probability = log(prob) if logs else prob
 
     def get(self, sequence):
         node = self.root
@@ -65,7 +138,6 @@ class PrefixTree:
         return node
 
     def traverse(self, node=None, sequence=None, size=None):
-
         sequence = sequence if sequence else []
         node = self.root if not node else node
 
@@ -86,19 +158,108 @@ class PrefixTree:
     def vocabulary(self, n=None):
         n = self.n if n is None else n
         v = set()
-        for ngram in self.traverse():
+        for ngram in self.traverse(size=n):
             v.add("_".join(ngram[:n]))
         v = sorted(list(v))
         return v
 
-    def predict_sentence(self, sentence):
-        from math import prod
-        probabilities = list()
-        for ngram in PrefixTree.extract_ngrams(sentence, self.n):
-            probabilities.append(self.get(ngram).probability)
-        return sum(probabilities) if self.logs else prod(probabilities)
 
-    def __deleted_interpolation__(self):
+class Cache(Predictor):
+
+    def __init__(self, maximum=200, minimum=5):
+        from collections import deque
+        self.minimum = minimum
+        self.maximum = maximum
+        self.cache = deque()
+        self.active = False
+
+    def store(self, data):
+        assert isinstance(data, collections.Iterable), "Data must be a sequence"
+        if isinstance(data, str):
+            data = data.strip().split()
+
+        removed_words = self._store_sentence(data)
+        return removed_words
+
+    def _store_sentence(self, sentence):
+        removed_words = list()
+        for word in sentence:
+            removed_word = self._store_word(word)
+            if removed_word is not None:
+                removed_words.append(removed_word)
+        return removed_words
+
+    def _store_word(self, word):
+        removed_word = None
+        if len(self.cache) == self.maximum:
+            removed_word = self.cache.popleft()
+        self.cache.append(word)
+        if len(self.cache) >= self.minimum:
+            self.active = True
+        return removed_word
+
+    def predict(self, data):
+        return self._frequency(data)
+
+    def train(self):
+        print("No need to train {}.".format(self))
+
+    def _frequency(self, word):
+        if self.active:
+            return self.cache.count(word) / len(self.cache)
+        print("Cache is not active, {} out of {} necessary items are present.".format(len(self.cache), self.minimum))
+        return None
+
+
+class CachedPrefixTree(PrefixTree):
+    """
+    A version of the prefix tree that uses a series of caches for interpolation as a unigram model.
+    If more than one cache is present, it will be used the mean among al caches.
+    """
+
+    def __init__(self, n=None, caches_lengths=200):
+        super(CachedPrefixTree, self).__init__(n)
+        self.caches = self._setup_cache(caches_lengths)
+        self.interpolation_coefficients = None
+
+    def _setup_cache(self, caches_lengths):
+        caches = list()
+        if caches_lengths:
+            if isinstance(caches_lengths, int):
+                caches.append(caches_lengths)
+            elif isinstance(caches_lengths, collections.Iterable):
+                for limit in caches_lengths:
+                    caches.append(Cache(limit))
+            else:
+                print("Error, expected int or a series of int, given:", caches_lengths)
+        else:
+            print("Error, no cache length has ben provided.")
+        return caches
+
+    def predict(self, data):
+        for cache in self.caches:
+            cache.store(data)
+        return super().predict(data)
+
+    def _predict_ngram(self, ngram):
+        tree_probability = super()._predict_ngram(ngram)
+        if self.interpolation_coefficients is None or len(self.caches) == 0 or all([cache.active for cache in self.caches]):
+            return tree_probability
+
+        cache_probability = 0.
+        for cache in self.caches:
+            cache_probability += cache.predict(ngram[-1])
+        cache_probability /= len(self.caches)
+        k_c = self.interpolation_coefficients[0]
+        k_t = self.interpolation_coefficients[1]
+        ngram_probability = k_c * cache_probability + k_t * tree_probability
+        return ngram_probability
+
+    def train(self, logs=False, smoothing=False):
+        super().train(logs, smoothing)
+        self.interpolation_coefficients = self._deleted_interpolation()
+
+    def _deleted_interpolation(self):
         w = [0] * self.n
         for ngram in self.traverse():
             # current ngram count
@@ -112,49 +273,21 @@ class PrefixTree:
             # increment weight of the max by raw ngram count
             k = d.index(max(d))
             w[k] += v
-        self.interpolation = [float(v) / sum(w) for v in w]
+        return [float(v) / sum(w) for v in w]
 
-    @staticmethod
-    def extract_ngrams(sequence, n):
-        assert n > 0, "n must be greater than 0, given: {}".format(n)
-        ngrams = list()
-        for i in range(n, len(sequence) + 1):
-            ngrams.append(sequence[i - n:i])
-        return ngrams
 
-    @staticmethod
-    def store_ngrams(corpus, n, tree=None):
-        assert n > 0, "n must be greater than 0, given: {}".format(n)
-        tree = PrefixTree(n) if not tree else tree
+class Storage:
+    def __init__(self, pos):
+        self.pos = pos
+        self.words = defaultdict(int)
+        self.total = 0
 
-        for sequence in corpus:
-            for ngram in PrefixTree.extract_ngrams(sequence, tree.n):
-                tree.add_ngram(ngram)
-        return tree
+    def store(self, word):
+        self.words[word] += 1
+        self.total += 1
 
-    @staticmethod
-    def compute_probabilities(tree, logs=False, smoothing=False):
-        tree.logs = logs
-        tree.smoothing = smoothing
-
-        v = len(tree.get_vocabulary(tree.n - 1)) if tree.smoothing else 0
-        a = 1 if tree.smoothing else 0
-
-        tree.error.probability = log(a / v) if (smoothing and logs) else 0.0
-
-        for ngram in tree.traverse():
-            n = tree.get(ngram)
-            p = tree.get(ngram[:-1])
-            prob = (n.count + a) / (p.count + v)
-            n.probability = log(prob) if logs else prob
-
-        return tree
-
-    def __set__(self, instance, value):
-        self.instance = value
-
-    def __get__(self, instance, owner):
-        return self.instance
+    def probability(self, word):
+        return self.words[word] / self.total
 
 
 class MultiNgramPrefixTree:
@@ -163,7 +296,7 @@ class MultiNgramPrefixTree:
     used to smooth out prediction
     """
 
-    def __init__(self, n):
+    def __init__(self, n, cache_length=0):
         assert n > 0, "n must be greater than 0, given: {}".format(n)
         self.n = n
         self.trees = dict()
@@ -243,37 +376,6 @@ class PosTree(MultiNgramPrefixTree):
 
     class PosCollector:
 
-        class Storage:
-            def __init__(self, pos):
-                self.pos = pos
-                self.words = defaultdict(int)
-                self.total = 0
-
-            def store(self, word):
-                self.words[word] += 1
-                self.total += 1
-
-            def frequency(self, word):
-                return self.words[word] / self.total
-
-        class Cache:
-
-            def __init__(self, pos, maximum=200):
-                from collections import deque
-                self.pos = pos
-                self.maximum = maximum
-                self.cache = deque()
-
-            def store(self, word):
-                removed_word = None
-                if len(self.cache) == self.maximum:
-                    removed_word = self.cache.popleft()
-                self.cache.append(word)
-                return removed_word
-
-            def frequency(self, word):
-                return self.cache.count(word) / len(self.cache)
-
         def __init__(self, caches_lengths=200, alpha=0.5):
             self.collectors = dict()
             self.caches = None
@@ -292,12 +394,12 @@ class PosTree(MultiNgramPrefixTree):
 
         def store(self, pos, word):
             if pos not in self.collectors.keys():
-                self.collectors[pos] = self.Storage(pos)
+                self.collectors[pos] = Storage(pos)
 
             if self.caches:
                 for i in range(len(self.caches)):
                     if pos not in self.caches[i].keys():
-                        self.caches[i][pos] = self.Cache(pos, self.caches_lengths[i])
+                        self.caches[i][pos] = Cache(self.caches_lengths[i])
 
             self.collectors[pos].store(word)
 
@@ -308,7 +410,7 @@ class PosTree(MultiNgramPrefixTree):
         def frequency(self, word):
             frequencies = dict()
             for pos, storage in self.collectors.items():
-                frequencies[pos] = storage.frequency(word)
+                frequencies[pos] = storage.probability(word)
             return frequencies
 
         def word_probability(self, word):
@@ -322,7 +424,7 @@ class PosTree(MultiNgramPrefixTree):
                 beta = (1 - self.alpha) / len(self.caches)
 
                 for i in range(len(self.caches)):
-                    probabilities[pos] += beta * self.caches[i][pos].frequency(word)
+                    probabilities[pos] += beta * self.caches[i][pos].probability(word)
 
             return probabilities
 
