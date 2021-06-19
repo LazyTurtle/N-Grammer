@@ -361,6 +361,9 @@ class MultiNgramPrefixTree(MultiPredictor):
 
 
 class Storage(Predictor):
+    """
+    Store the frequencies of singular words among an entire set of words
+    """
     def __init__(self, pos=None):
         self.pos = pos
         self.words = defaultdict(int)
@@ -381,62 +384,87 @@ class Storage(Predictor):
         return self.words[word] / self.total
 
 
-class PosTree(MultiNgramPrefixTree):
+class CachedStorage(Storage):
+    """
+    Grant the storage a cache
+    """
+
+    def __init__(self, pos=None, cache_size=200, coefficients=None):
+        super().__init__(pos)
+        self.cache = Cache(cache_size)
+        self.coefficients = coefficients
+
+    def store(self, data):
+        super().store(data)
+
+    def predict(self, data):
+        self.cache.store(data)
+        storage_part = super().predict(data)
+        cache_part = self.cache.predict(data)
+        f_c = self.coefficients[0]
+        f_s = self.coefficients[1]
+        probability = f_c * cache_part + f_s * storage_part
+        return probability
+
+
+class Collector(Predictor):
+
+    def __init__(self, caches_lengths=200, alpha=0.5):
+        self.collectors = dict()
+        self.caches = None
+        self.caches_lengths = caches_lengths
+        assert 0 <= alpha <= 1, "Alpha must be a number between 0 and 1, given: {}".format(alpha)
+        self.alpha = alpha
+
+        if self.caches_lengths:
+            if isinstance(self.caches_lengths, int):
+                self.caches_lengths = [self.caches_lengths]
+                self.caches = [dict()]
+            elif isinstance(self.caches_lengths, collections.Iterable):
+                self.caches = [dict()] * len(self.caches_lengths)
+            else:
+                print("Error, expected int or an iterable object, given:", self.caches_lengths)
+
+    def store(self, pos, word):
+        if pos not in self.collectors.keys():
+            self.collectors[pos] = Storage(pos)
+
+        if self.caches:
+            for i in range(len(self.caches)):
+                if pos not in self.caches[i].keys():
+                    self.caches[i][pos] = Cache(self.caches_lengths[i])
+
+        self.collectors[pos].store(word)
+
+        if self.caches:
+            for cache in self.caches:
+                cache[pos].store(word)
+
+    def frequency(self, word):
+        frequencies = dict()
+        for pos, storage in self.collectors.items():
+            frequencies[pos] = storage.probability(word)
+        return frequencies
+
+    def word_probability(self, word):
+        if not self.caches:
+            return self.frequency(word)
+
+        probabilities = dict()
+        for pos, frequency in self.collectors.items():
+            probabilities[pos] = self.alpha * frequency
+
+            beta = (1 - self.alpha) / len(self.caches)
+
+            for i in range(len(self.caches)):
+                probabilities[pos] += beta * self.caches[i][pos].probability(word)
+
+        return probabilities
+
+class PosTree(PrefixTree):
     spacy_model_path = "en_core_web_sm"
 
-    class PosCollector:
 
-        def __init__(self, caches_lengths=200, alpha=0.5):
-            self.collectors = dict()
-            self.caches = None
-            self.caches_lengths = caches_lengths
-            assert 0 <= alpha <= 1, "Alpha must be a number between 0 and 1, given: {}".format(alpha)
-            self.alpha = alpha
-
-            if self.caches_lengths:
-                if isinstance(self.caches_lengths, int):
-                    self.caches_lengths = [self.caches_lengths]
-                    self.caches = [dict()]
-                elif isinstance(self.caches_lengths, collections.Iterable):
-                    self.caches = [dict()] * len(self.caches_lengths)
-                else:
-                    print("Error, expected int or an iterable object, given:", self.caches_lengths)
-
-        def store(self, pos, word):
-            if pos not in self.collectors.keys():
-                self.collectors[pos] = Storage(pos)
-
-            if self.caches:
-                for i in range(len(self.caches)):
-                    if pos not in self.caches[i].keys():
-                        self.caches[i][pos] = Cache(self.caches_lengths[i])
-
-            self.collectors[pos].store(word)
-
-            if self.caches:
-                for cache in self.caches:
-                    cache[pos].store(word)
-
-        def frequency(self, word):
-            frequencies = dict()
-            for pos, storage in self.collectors.items():
-                frequencies[pos] = storage.probability(word)
-            return frequencies
-
-        def word_probability(self, word):
-            if not self.caches:
-                return self.frequency(word)
-
-            probabilities = dict()
-            for pos, frequency in self.collectors.items():
-                probabilities[pos] = self.alpha * frequency
-
-                beta = (1 - self.alpha) / len(self.caches)
-
-                for i in range(len(self.caches)):
-                    probabilities[pos] += beta * self.caches[i][pos].probability(word)
-
-            return probabilities
 
     def __init__(self, n, caches_lengths=None, alpha=0.5):
         super().__init__(n)
