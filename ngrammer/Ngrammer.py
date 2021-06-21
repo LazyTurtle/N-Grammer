@@ -1,4 +1,5 @@
 import collections
+import math
 from math import log
 import spacy
 from collections import defaultdict
@@ -169,12 +170,13 @@ class PrefixTree(Predictor):
 
 class Cache(Predictor):
 
-    def __init__(self, maximum=200, minimum=5):
+    def __init__(self, maximum=200, minimum=5, logs=False):
         from collections import deque
         self.minimum = minimum
         self.maximum = maximum
         self.cache = deque()
         self.active = False
+        self.logs = logs
 
     def store(self, data):
         assert isinstance(data, collections.Iterable), "Data must be a sequence"
@@ -202,7 +204,10 @@ class Cache(Predictor):
         return removed_word
 
     def predict(self, data):
-        return self._frequency(data)
+        prob = self._frequency(data)
+        if self.logs:
+            prob = math.log(prob)
+        return prob
 
     def train(self):
         print("No need to train {}.".format(self))
@@ -260,6 +265,8 @@ class CachedPrefixTree(PrefixTree):
 
     def train(self, logs=False, smoothing=False):
         super().train(logs, smoothing)
+        for cache in self.caches:
+            cache.logs = logs
         self.interpolation_coefficients = self._deleted_interpolation()
 
     def set_coefficients(self,new_coefficients):
@@ -371,10 +378,11 @@ class Storage(Predictor):
     Store the frequencies of singular words among an entire set of words
     """
 
-    def __init__(self, pos=None):
+    def __init__(self, pos=None, logs=False):
         self.pos = pos
         self.words = defaultdict(int)
         self.total = 0
+        self.logs = logs
 
     def store(self, data):
         self.words[data] += 1
@@ -382,10 +390,12 @@ class Storage(Predictor):
 
     def predict(self, data):
         prediction = self._probability(data)
+        if self.logs:
+            prediction = math.log(prediction)
         return prediction
 
     def train(self):
-        print("No need for training {}".format(self))
+        print("No need to train {}".format(self))
 
     def _probability(self, word):
         return self.words[word] / self.total
@@ -396,9 +406,9 @@ class CachedStorage(Storage):
     Grant the storage a cache
     """
 
-    def __init__(self, pos=None, cache_size=200, coefficients=None):
-        super().__init__(pos)
-        self.cache = Cache(cache_size)
+    def __init__(self, pos=None, coefficients=None, cache_size=200, logs=False):
+        super().__init__(pos, logs)
+        self.cache = Cache(cache_size, logs=logs)
         self.coefficients = coefficients
 
     def store(self, data):
@@ -415,20 +425,25 @@ class CachedStorage(Storage):
             return probability
         return storage_part
 
+    def set_logs(self, logs=False):
+        self.logs = logs
+        self.cache.logs = logs
+
 
 class Collector(Predictor):
     """
     Collect the frequencies of single words over their part of speech in different cached storages
     """
 
-    def __init__(self, caches_lengths=200):
+    def __init__(self, caches_lengths=200, logs=False):
         self.collectors = dict()
         self.caches_lengths = caches_lengths
+        self.logs = logs
 
     def store(self, data):
         pos, word = data
         if pos not in self.collectors.keys():
-            self.collectors[pos] = CachedStorage(pos, self.caches_lengths)
+            self.collectors[pos] = CachedStorage(pos, self.caches_lengths, logs=self.logs)
         self.collectors[pos].store(word)
 
     def predict(self, data):
@@ -440,6 +455,10 @@ class Collector(Predictor):
     def set_coefficients(self, coefficients):
         for pos, storage in self.collectors.items():
             storage.coefficients = coefficients
+
+    def set_logs(self, logs=False):
+        for pos, collector in self.collectors.items():
+            collector.set_logs(logs)
 
 
 class PosTree(PrefixTree):
@@ -472,6 +491,7 @@ class PosTree(PrefixTree):
         cache_coef = coefficients[0] / self.collector_coefficient
         storage_coef = coefficients[1] / self.collector_coefficient
         self.word_collector.set_coefficients((cache_coef, storage_coef))
+        self.word_collector.set_logs(logs)
 
     def _predict_sentence(self, sentence):
         from math import prod
