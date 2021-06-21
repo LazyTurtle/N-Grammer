@@ -37,6 +37,29 @@ def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, lengt
         print()
 
 
+def extract_coefficients(n, corpus):
+    tree = CachedPrefixTree(n)
+    for sentence in corpus:
+        tree.store(sentence)
+    tree.train()
+    interpolation = tree._deleted_interpolation()
+    return interpolation
+
+
+def test_trees(trees, test_data):
+    n_test_data = len(test_data)
+    perplexities = defaultdict(int)
+    for sentence in test_data:
+        for name, tree in trees.items():
+            perplexities[tree]+=calc_perplexity(tree,sentence)
+
+    for tree, perplexity in perplexities.items():
+        perplexities[tree]/=n_test_data
+
+    for name, tree in trees.items():
+        print("Mean Perplexity {}: {}".format(name,perplexities[tree]))
+
+
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     print("Start")
@@ -45,58 +68,53 @@ if __name__ == '__main__':
     validation = "dataset/ptbdataset/ptb.valid.txt"
     test = "dataset/ptbdataset/ptb.test.txt"
 
-    print("Loading dataset")
+    print("Loading datasets")
     train_corpus = CorpusHandler.load_corpus(train, annotations)
     validation_corpus = CorpusHandler.load_corpus(validation, annotations)
     test_corpus = CorpusHandler.load_corpus(test, annotations)
 
     N = 3
 
+    coefficients = extract_coefficients(N, validation_corpus)
+
     print("Instantiating trees")
-    standard_prefix_tree = PrefixTree(N)
-    single_cache_tree = CachedPrefixTree(N)
-    multi_cache_tree = CachedPrefixTree(N, [200, 100, 25])
-    cached_pos_tree = PosTree(N)
+    trees = dict()
+    trees["Standard prefix tree"] = PrefixTree(N)
+    trees["Single cache(200) prefix tree"] = CachedPrefixTree(N)
+    trees["Single cache(100) prefix tree"] = CachedPrefixTree(N, 100)
+    trees["Single cache(50) prefix tree"] = CachedPrefixTree(N, 50)
+    trees["Multi cache(200,100,50) prefix tree"] = CachedPrefixTree(N, [200, 100, 50])
+    trees["POS prefix tree"] = PosTree(N)
 
     print("Loading train data")
     print("")
 
     n_samples = len(train_corpus)
 
-    print("Loading standard tree:")
-    """
-    In the case one uses pycharm to run this program, 
-    it is necessary to enable the terminal simulation
-    in the setting for the run window to correctly view the progress bar
-    """
-    print_progress_bar(0, n_samples, prefix='Progress:', suffix='Complete', length=50)
-    for i in range(n_samples):
-        standard_prefix_tree.store(train_corpus[i])
-        print_progress_bar(i + 1, n_samples, prefix='Progress:', suffix='Complete', length=50)
-
-    print("Loading single cache tree:")
-    print_progress_bar(0, n_samples, prefix='Progress:', suffix='Complete', length=50)
-    for i in range(n_samples):
-        single_cache_tree.store(train_corpus[i])
-        print_progress_bar(i + 1, n_samples, prefix='Progress:', suffix='Complete', length=50)
-
-    print("Loading multi cache tree:")
-    print_progress_bar(0, n_samples, prefix='Progress:', suffix='Complete', length=50)
-    for i in range(n_samples):
-        multi_cache_tree.store(train_corpus[i])
-        print_progress_bar(i + 1, n_samples, prefix='Progress:', suffix='Complete', length=50)
-
     """
     The pos tree takes an enormous amount of time to load
     this is because it uses spacy to parse every single sentence one by one singularly
+    
+    In the case one uses pycharm to run this program, 
+    it is necessary to enable the terminal simulation for the debug console
+    in the setting for the run window to correctly view the progress bar
     """
-    print("Loading cached pos tree:")
-    print_progress_bar(0, n_samples, prefix='Progress:', suffix='Complete', length=50)
-    for i in range(n_samples):
-        cached_pos_tree.store(train_corpus[i])
-        print_progress_bar(i + 1, n_samples, prefix='Progress:', suffix='Complete', length=50)
+    for name, tree in trees.items():
+        print("Loading data into: {}".format(name))
+        print_progress_bar(0, n_samples, prefix='Progress:', suffix='Complete', length=50)
+        for i in range(n_samples):
+            tree.store(train_corpus[i])
+            print_progress_bar(i + 1, n_samples, prefix='Progress:', suffix='Complete', length=50)
+        print("")
 
-    print(standard_prefix_tree)
-    print(single_cache_tree)
-    print(multi_cache_tree)
-    print(cached_pos_tree)
+    logs = False
+    smoothing = False
+    for name, tree in trees.items():
+        print("Training: ", name)
+        tree.train(logs, smoothing)
+
+    for name, tree in trees.items():
+        if hasattr(tree.__class__, 'set_coefficients') and callable(getattr(tree.__class__, 'set_coefficients')):
+            tree.set_coefficients(coefficients)
+
+    test_trees(trees,test_corpus)

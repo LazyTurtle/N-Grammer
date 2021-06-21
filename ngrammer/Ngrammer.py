@@ -9,9 +9,9 @@ def log2prob(log_value):
     return exp(log_value) if log_value else 0.0
 
 
-def perplexity(tree, sentence):
+def calc_perplexity(tree, sentence):
     n = len(sentence)
-    probability = tree.predict_sentence(sentence)
+    probability = tree.predict(sentence)
     perp = (1 / probability) ** (1 / n)
     return perp
 
