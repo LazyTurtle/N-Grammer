@@ -251,7 +251,8 @@ class CachedPrefixTree(PrefixTree):
 
     def _predict_ngram(self, ngram):
         tree_probability = super()._predict_ngram(ngram)
-        if self.interpolation_coefficients is None or len(self.caches) == 0 or not all([cache.active for cache in self.caches]):
+        if self.interpolation_coefficients is None or len(self.caches) == 0 or not all(
+                [cache.active for cache in self.caches]):
             return tree_probability
 
         cache_probability = 0.
@@ -259,7 +260,12 @@ class CachedPrefixTree(PrefixTree):
             cache_probability += cache.predict(ngram[-1])
         cache_probability /= len(self.caches)  # in case we have many caches we use their mean
         k_c = self.interpolation_coefficients[0]
-        k_t = sum(self.interpolation_coefficients[1:])
+        k_t = self.interpolation_coefficients[self.n - 1]
+        coef_sum = sum(self.interpolation_coefficients[1:self.n - 1])
+        c = coef_sum * (k_c / (k_c + k_t))
+        t = coef_sum * (k_t / (k_c + k_t))
+        k_c += c
+        k_t += t
         ngram_probability = k_c * cache_probability + k_t * tree_probability
         return ngram_probability
 
