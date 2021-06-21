@@ -1,3 +1,6 @@
+import collections
+
+
 def load_corpus(corpus_file, annotations=True, filter_unknown=False, cutoff_line=1, placeholder="[Unknown]"):
     corpus = read_corpus(corpus_file)
     if annotations:
@@ -74,3 +77,29 @@ def filter_unknowns(corpus, lexicon, unknown="[Unknown]"):
             word = corpus[i][j]
             corpus[i][j] = word if word in lexicon else unknown
     return corpus
+
+
+def partition_corpus(corpus, parts=None):
+    if parts is None:
+        parts = [0.5, 0.5]
+    assert isinstance(parts, collections.Iterable), "Parts bust be a sequence of numbers summing to 1, given:{}".format(parts)
+    assert sum(parts) == 1, "Parts must sum to 1, given:{}".format(parts)
+    n = len(corpus)
+    k = 0
+    partitions = list()
+    for i in partitions:
+        if not i == len(parts)-1:
+            k_u = round(k + n * parts[i])
+            partitions.append(corpus[k:k_u])
+            k = k_u
+        else:
+            partitions.append(corpus[k:])
+
+    return partitions
+
+
+def word_length(corpus):
+    words = 0
+    for sentence in corpus:
+        words += len(sentence)
+    return words
