@@ -252,7 +252,7 @@ class CachedPrefixTree(PrefixTree):
         cache_probability = 0.
         for cache in self.caches:
             cache_probability += cache.predict(ngram[-1])
-        cache_probability /= len(self.caches)
+        cache_probability /= len(self.caches)  # in case we have many caches we use their mean
         k_c = self.interpolation_coefficients[0]
         k_t = sum(self.interpolation_coefficients[1:])
         ngram_probability = k_c * cache_probability + k_t * tree_probability
@@ -261,6 +261,9 @@ class CachedPrefixTree(PrefixTree):
     def train(self, logs=False, smoothing=False):
         super().train(logs, smoothing)
         self.interpolation_coefficients = self._deleted_interpolation()
+
+    def set_coefficients(self,new_coefficients):
+        self.interpolation_coefficients = new_coefficients
 
     def _deleted_interpolation(self):
         w = [0] * self.n
@@ -301,6 +304,9 @@ class MultiPredictor(Predictor):
     def train(self):
         for predictor in self.predictors:
             predictor.train()
+
+    def set_coefficients(self,new_coefficients):
+        self.coefficients = new_coefficients
 
     def _construct_predictors(self):
         return None
@@ -523,6 +529,10 @@ class PosTree(PrefixTree):
         pos_sentence = ["X"] + [token.pos_ for token in doc] + ["X"]
 
         return sentence, pos_sentence
+
+    def set_coefficients(self, new_coefficients):
+        self.collector_coefficient = sum(new_coefficients[:2])
+        self.tree_coefficient = sum(new_coefficients[2:])
 
     def _deleted_interpolation(self):
         w = [0] * self.n
