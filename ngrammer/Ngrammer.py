@@ -13,6 +13,8 @@ def log2prob(log_value):
 def calc_perplexity(tree, sentence):
     n = len(sentence)
     probability = tree.predict(sentence)
+    if tree.logs:
+        probability = log2prob(probability)
     perp = (1 / probability) ** (1 / n)
     return perp
 
@@ -122,7 +124,7 @@ class PrefixTree(Predictor):
         self.logs = logs
         self.smoothing = smoothing
 
-        v = len(self.vocabulary(self.n - 1)) if self.smoothing else 0
+        v = len(self.vocabulary(n=1)) if self.smoothing else 0
         a = 1 if self.smoothing else 0
 
         self.error.probability = log(a / v) if (smoothing and logs) else 0.0
