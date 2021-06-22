@@ -11,6 +11,8 @@ def log2prob(log_value):
 
 def calc_perplexity(tree, sentence):
     n = len(sentence)
+    if n == 47:
+        print("here")
     probability = tree.predict(sentence)
     if tree.logs:
         probability = log2prob(probability)
@@ -72,6 +74,7 @@ class PrefixTree(Predictor):
         self.n = n
         self.logs = None
         self.smoothing = None
+        self.v = set()
 
     def store(self, data):
         assert isinstance(data, collections.Sequence), "Data must be a sequence"
@@ -95,6 +98,7 @@ class PrefixTree(Predictor):
         node.count += 1
         for word in sequence:
             word = str(word)
+            self.v.add(word)
             node.children[word] = node.children.setdefault(word, Node(word))
             node = node.children[word]
             node.count += 1
@@ -178,6 +182,12 @@ class PrefixTree(Predictor):
         v = sorted(list(v))
         return v
 
+    def construct_vocabulary(self, corpus):
+        self.v = set()
+        for sentence in corpus:
+            for word in sentence:
+                self.v.add(word)
+
 
 class Cache(Predictor):
     """
@@ -233,13 +243,18 @@ class MultiCache(Predictor):
     """
     A predictor that uses multiple caches to evaluate a word
     """
+
     def __init__(self, lengths, coefficients=None):
         super(MultiCache, self).__init__()
-        assert isinstance(lengths, collections.Sequence) or isinstance(lengths, int), "lengths must be a sequence of sizes, given: {}".format(lengths)
+        assert isinstance(lengths, collections.Sequence) or isinstance(lengths,
+                                                                       int), "lengths must be a sequence of sizes, given: {}".format(
+            lengths)
 
         self.n = len(lengths) if isinstance(lengths, collections.Sequence) else 1
         if coefficients is not None:
-            assert len(coefficients) == self.n, "The number of coefficients({}) must equal the number of caches({})".format(len(coefficients), self.n)
+            assert len(
+                coefficients) == self.n, "The number of coefficients({}) must equal the number of caches({})".format(
+                len(coefficients), self.n)
         self.coefficients = coefficients
 
         self.caches = list()
@@ -363,7 +378,8 @@ class CachedMultiNgramPrefixTree(Predictor):
     used to smooth out predictions
     """
 
-    def __init__(self, n=None, caches_lengths=None, coefficients=None, cache_coefficients=None, logs=False, smoothing=False):
+    def __init__(self, n=None, caches_lengths=None, coefficients=None, cache_coefficients=None, logs=False,
+                 smoothing=False):
         super(CachedMultiNgramPrefixTree, self).__init__()
         assert n > 0, "n must be greater than 0, given: {}".format(n)
         self.n = n
@@ -371,7 +387,7 @@ class CachedMultiNgramPrefixTree(Predictor):
         self.coefficients = coefficients
         self.trees = list()
 
-        for i in range(2, n+1):
+        for i in range(2, n + 1):
             self.trees.append(PrefixTree(i))
 
         self.logs = logs
@@ -558,12 +574,16 @@ class PosTree(PrefixTree):
     """
     spacy_model_path = "en_core_web_sm"
 
+    tags = ["ADJ", "ADP", "ADV", "AUX", "CONJ", "CCONJ", "DET", "INTJ", "NOUN", "NUM", "PART", "PRON", "PROPN", "PUNCT",
+            "SCONJ", "SYM", "VERB", "X"]
+
     def __init__(self, n=3, caches_lengths=200):
         super(PosTree, self).__init__(n)
         self.nlp = self._setup_spacy()
         self.cache = Collector(caches_lengths)
         self.cache_coefficient = None
         self.tree_coefficient = None
+        self.turing = None
 
     def store(self, data):
         sentence, pos_sentence = self._convert_to_pos(data)
@@ -595,9 +615,13 @@ class PosTree(PrefixTree):
         return result
 
     def _predict_pos_ngram(self, ngram, posgram):
+        word = ngram[-1]
+        if word not in self.v:
+            return log(self.turing) if self.logs else self.turing
+
         parent = self.get(posgram[:-1])
         probabilities = list()
-        word_probabilities = self.cache.predict(ngram[-1])
+        word_probabilities = self.cache.predict(word)
         for possible_pos_gram in self.traverse(parent, posgram[:-1], self.n):
             current_pos = possible_pos_gram[-1]
             pos_probability = super()._predict_ngram(possible_pos_gram, False)
@@ -606,6 +630,9 @@ class PosTree(PrefixTree):
             probabilities.append(joint_probability)
 
         probability = sum(probabilities)
+        if probability == 0:
+            probability = self.turing
+
         if self.logs:
             probability = log(probability)
         return probability
@@ -663,3 +690,15 @@ class PosTree(PrefixTree):
             k = d.index(max(d))
             w[k] += v
         return [float(v) / sum(w) for v in w]
+
+    def _all_possible_combination(self, n=None, sequence=None):
+        sequence = list() if sequence is None else sequence
+        n = 0 if n is None else 0
+        if len(sequence) == n:
+            yield sequence
+            return
+
+        for word in PosTree.tags:
+            sequence.append(word)
+            yield from self._all_possible_combination(n,sequence)
+            sequence.pop()
