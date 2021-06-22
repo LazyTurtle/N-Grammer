@@ -82,7 +82,7 @@ def filter_unknowns(corpus, lexicon, unknown="[Unknown]"):
 def partition_corpus(corpus, parts=None):
     if parts is None:
         parts = [0.5, 0.5]
-    assert isinstance(parts, collections.Iterable), "Parts bust be a sequence of numbers summing to 1, given:{}".format(parts)
+    assert isinstance(parts, collections.Sequence), "Parts bust be a sequence of numbers summing to 1, given:{}".format(parts)
     assert sum(parts) == 1, "Parts must sum to 1, given:{}".format(parts)
     n = len(corpus)
     k = 0
@@ -103,3 +103,20 @@ def word_length(corpus):
     for sentence in corpus:
         words += len(sentence)
     return words
+
+
+def good_turing_estimate(corpus):
+    from collections import defaultdict
+    words = defaultdict(int)
+
+    for sentence in corpus:
+        for word in sentence:
+            words[word] += 1
+
+    unique_words = 0
+    for word, count in words.items():
+        if count == 1:
+            unique_words += 1
+
+    n_words = len(words)
+    return unique_words / n_words
