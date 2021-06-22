@@ -11,8 +11,6 @@ def log2prob(log_value):
 
 def calc_perplexity(tree, sentence):
     n = len(sentence)
-    if n == 47:
-        print("here")
     probability = tree.predict(sentence)
     if tree.logs:
         probability = log2prob(probability)
@@ -571,6 +569,9 @@ class PosTree(PrefixTree):
     """
     Uses the POS in the prefix tree and the collectors in order to compute the probabilities of sentences
     Predict data should be already formatted properly
+
+    I've spent on this more time than everything else combined, and I still couldn't manage to make it work
+    At this point, I don't have the time to fix it
     """
     spacy_model_path = "en_core_web_sm"
 

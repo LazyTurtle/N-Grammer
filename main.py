@@ -2,13 +2,13 @@ from ngrammer.Ngrammer import *
 from ngrammer import CorpusHandler
 
 
-def generate(tree, sos="[Start]", eos="[End]"):
+def generate(trie, sos="[Start]", eos="[End]"):
     import random
     word = sos
     sentence = [sos]
     while word != eos:
-        temp = sentence[-(tree.n - 1):]
-        node = tree.get(temp)
+        temp = sentence[-(trie.n - 1):]
+        node = trie.get(temp)
         children = list(node.children.keys())
         word = random.choice(children)
         sentence.append(word)
@@ -38,31 +38,30 @@ def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, lengt
 
 
 def extract_coefficients(n, corpus):
-    tree = CachedPrefixTree(n)
+    temp = CachedPrefixTree(n)
     for sentence in corpus:
-        tree.store(sentence)
-    tree.train()
-    interpolation = tree._deleted_interpolation()
+        temp.store(sentence)
+    temp.train()
+    interpolation = temp._deleted_interpolation()
     return interpolation
 
 
-def test_trees(trees, test_data):
+def test_trees(trees_to_test, test_data):
     print("Start testing")
-    print_progress_bar(0, n_samples, prefix='Progress:', suffix='Complete', length=50)
     n_test_data = len(test_data)
     perplexities = defaultdict(int)
-    for i in range(n_test_data):
+    print_progress_bar(0, n_test_data, prefix='Progress:', suffix='Complete', length=50)
+    for j in range(n_test_data):
+        for n, t in trees_to_test.items():
+            perplexities[t] += calc_perplexity(t, test_data[j])
+        print_progress_bar(j + 1, n_test_data, prefix='Progress:', suffix='Complete', length=50)
+    print("")
 
-        for name, tree in trees.items():
-            perplexities[tree] += calc_perplexity(tree, test_data[i])
-        print_progress_bar(i + 1, n_samples, prefix='Progress:', suffix='Complete', length=50)
+    for t, perplexity in perplexities.items():
+        perplexities[t] /= n_test_data
 
-
-    for tree, perplexity in perplexities.items():
-        perplexities[tree] /= n_test_data
-
-    for name, tree in trees.items():
-        print("Mean Perplexity {}: {}".format(name, perplexities[tree]))
+    for n, t in trees.items():
+        print("Mean Perplexity {}: {}".format(n, perplexities[t]))
 
 
 # Press the green button in the gutter to run the script.
@@ -98,6 +97,7 @@ if __name__ == '__main__':
     trees["Multi ngram cached(25) prefix tree"] = CachedMultiNgramPrefixTree(N, 25)
     trees["Multi cache(200,100,50) prefix tree"] = CachedPrefixTree(N, [200, 100, 50])
     trees["Multi ngram cached(200,100,50) prefix tree"] = CachedMultiNgramPrefixTree(N, [200, 100, 50])
+    # trees["Pos prefix tree"] = PosTree(N) # can't make it work
 
     print("Loading train data")
     print("")
@@ -119,7 +119,6 @@ if __name__ == '__main__':
         for i in range(n_samples):
             tree.store(train_corpus[i])
             print_progress_bar(i + 1, n_samples, prefix='Progress:', suffix='Complete', length=50)
-        tree.construct_vocabulary(train_corpus)
         print("")
 
     logs = True
@@ -127,7 +126,6 @@ if __name__ == '__main__':
     for name, tree in trees.items():
         print("Training: ", name)
         tree.train(logs, smoothing)
-        tree.turing = turing
 
     for name, tree in trees.items():
         if hasattr(tree.__class__, 'set_coefficients') and callable(getattr(tree.__class__, 'set_coefficients')):
