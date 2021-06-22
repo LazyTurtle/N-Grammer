@@ -370,12 +370,9 @@ class CachedMultiNgramPrefixTree(Predictor):
         self.cache = MultiCache(caches_lengths, cache_coefficients)
         self.coefficients = coefficients
         self.trees = list()
-        self.predictors = list()
 
         for i in range(2, n+1):
             self.trees.append(PrefixTree(i))
-
-        self.predictors = [self.cache] + self.trees
 
         self.logs = logs
         self.smoothing = smoothing
@@ -515,19 +512,16 @@ class CachedStorage(Storage):
         self.cache = Cache(cache_size)
         self.coefficients = coefficients
 
-    def store(self, data):
-        super().store(data)
-
     def predict(self, data):
         storage_part = super().predict(data)
         cache_part = self.cache.predict(data)
+        probability = storage_part
         if cache_part is not None:
             f_c = self.coefficients[0]
             f_s = self.coefficients[1]
             probability = f_c * cache_part + f_s * storage_part
-            return probability
         self.cache.store(data)
-        return storage_part
+        return probability
 
 
 class Collector(Predictor):
@@ -536,6 +530,7 @@ class Collector(Predictor):
     """
 
     def __init__(self, caches_lengths=200):
+        assert isinstance(caches_lengths, int), "In PosTree caches_lengths can only be a integer"
         self.collectors = dict()
         self.caches_lengths = caches_lengths
 
@@ -556,19 +551,19 @@ class Collector(Predictor):
             storage.coefficients = coefficients
 
 
-class PosTree(CachedMultiNgramPrefixTree):
+class PosTree(PrefixTree):
     """
     Uses the POS in the prefix tree and the collectors in order to compute the probabilities of sentences
-    The predict data should be already formatted properly
+    Predict data should be already formatted properly
     """
     spacy_model_path = "en_core_web_sm"
 
-    def __init__(self, n, caches_length=200):
+    def __init__(self, n=3, caches_lengths=200):
         super(PosTree, self).__init__(n)
         self.nlp = self._setup_spacy()
-        self.word_collector = Collector(caches_length)
+        self.cache = Collector(caches_lengths)
+        self.cache_coefficient = None
         self.tree_coefficient = None
-        self.collector_coefficient = None
 
     def store(self, data):
         sentence, pos_sentence = self._convert_to_pos(data)
@@ -576,17 +571,12 @@ class PosTree(CachedMultiNgramPrefixTree):
         for i in range(len(sentence)):
             word = sentence[i]
             pos = pos_sentence[i]
-            self.word_collector.store((pos, word))
+            self.cache.store((pos, word))
 
     def train(self, logs=False, smoothing=False):
         super().train(logs, smoothing)
         coefficients = self._deleted_interpolation()
-        self.collector_coefficient = sum(coefficients[:2])
-        self.tree_coefficient = sum(coefficients[2:])
-        cache_coef = coefficients[0] / self.collector_coefficient
-        storage_coef = coefficients[1] / self.collector_coefficient
-        self.word_collector.set_coefficients((cache_coef, storage_coef))
-        self.word_collector.set_logs(logs)
+        self.set_coefficients(coefficients)
 
     def _predict_sentence(self, sentence):
         from math import prod
@@ -607,14 +597,17 @@ class PosTree(CachedMultiNgramPrefixTree):
     def _predict_pos_ngram(self, ngram, posgram):
         parent = self.get(posgram[:-1])
         probabilities = list()
-        word_probabilities = self.word_collector.predict(ngram[-1])
+        word_probabilities = self.cache.predict(ngram[-1])
         for possible_pos_gram in self.traverse(parent, posgram[:-1], self.n):
             current_pos = possible_pos_gram[-1]
-            pos_probability = super()._predict_ngram(possible_pos_gram)
+            pos_probability = super()._predict_ngram(possible_pos_gram, False)
             word_probability = word_probabilities[current_pos]
-            joint_probability = word_probability * self.collector_coefficient + pos_probability * self.tree_coefficient
+            joint_probability = (word_probability * self.cache_coefficient) * (pos_probability * self.tree_coefficient)
             probabilities.append(joint_probability)
+
         probability = sum(probabilities)
+        if self.logs:
+            probability = log(probability)
         return probability
 
     def _setup_spacy(self, unknown_placeholder="UNKNOWN"):
@@ -633,6 +626,9 @@ class PosTree(CachedMultiNgramPrefixTree):
             sentence = sentence[1:-1]
 
         for i in range(len(sentence)):
+            # spacy does not like the string "<unk>" and tries to separate everything
+            # since there are no natural occurrences of "UNKNOWN" I'll use that word
+            # as new OOV placeholder, and treat it as a special character in spacy
             if sentence[i] == "<unk>":
                 sentence[i] = unknown_placeholder
 
@@ -646,8 +642,11 @@ class PosTree(CachedMultiNgramPrefixTree):
         return sentence, pos_sentence
 
     def set_coefficients(self, new_coefficients):
-        self.collector_coefficient = sum(new_coefficients[:2])
+        self.cache_coefficient = sum(new_coefficients[:2])
         self.tree_coefficient = sum(new_coefficients[2:])
+        cache_coef = new_coefficients[0] / self.cache_coefficient
+        storage_coef = new_coefficients[1] / self.cache_coefficient
+        self.cache.set_coefficients((cache_coef, storage_coef))
 
     def _deleted_interpolation(self):
         w = [0] * self.n
